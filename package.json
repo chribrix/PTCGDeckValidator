@@ -1,0 +1,20 @@
+{
+  "name": "ptcg_validator",
+  "version": "0.0.1",
+  "description": "Tool to validate Pokemon TCG Decklists",
+  "main": "index.js",
+  "type": "module",
+  "author": "Chris Brinker <chrisbrinker@pm.me>",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.0.3",
+    "tsc": "^2.0.4"
+  },
+  "scripts": {
+    "start": "node --loader=@esbuild-kit/esm-loader src/index.ts"
+  },
+  "dependencies": {
+    "@esbuild-kit/esm-loader": "^2.6.5",
+    "pokemon-tcg-sdk-typescript": "^1.3.4"
+  }
+}
