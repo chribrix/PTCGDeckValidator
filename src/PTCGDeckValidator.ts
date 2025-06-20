@@ -10,13 +10,6 @@ type CardToken = {
   set: string;
 };
 
-class IncorrectCardAmountError extends Error {
-  constructor(cardCount: number) {
-    super(`Must be exactly 60 cards, but got ${cardCount}.`);
-    this.name = "IncorrectCardAmountError";
-  }
-}
-
 class CardNotProvidedbyPTCGIOError extends Error {
   constructor(name: string) {
     super(`No results provided by PokemonTCGIO for Card Name: ${name}`);
@@ -25,14 +18,17 @@ class CardNotProvidedbyPTCGIOError extends Error {
 }
 
 class PTCGDeckValidator {
-  readonly apiKey: string;
   private deck: Deck;
-
-  constructor(apiKey?: string) {
-    if (apiKey !== undefined) {
-      this.apiKey = apiKey;
-    }
-  }
+  private energyNameMap = {
+    D: "Darkness Energy",
+    P: "Psychic Energy",
+    R: "Fire Energy",
+    F: "Fighting Energy",
+    W: "Water Energy",
+    G: "Grass Energy",
+    M: "Metal Energy",
+    L: "Lightning Energy",
+  };
 
   async setDeck(deckString: string) {
     const lines = deckString.split(/\r?\n/);
@@ -43,19 +39,13 @@ class PTCGDeckValidator {
     const pattern = /^\d+ .+ [A-Za-z-]{2,5} \d{1,3}$/;
     let filtered = lines.filter((line) => pattern.test(line));
 
-    // make sure it's exactly 60 cards
-    let numCards = filtered
-      .map((line) => parseInt(line.split(" ")[0], 10))
-      .reduce((acc, val) => acc + val, 0);
-
-    if (numCards !== 60) {
-      throw new IncorrectCardAmountError(numCards);
-    }
-
     // format find out set and setId to query against pokemonTcgIo
     const deckTokens: Array<CardToken> = filtered.map((card) => {
       const parts = card.split(" ");
       const length = parts.length;
+
+      // parse energy export name differences
+      // Basic {D} Energy ->> Darkness Energy
 
       return {
         inDeck: parseInt(parts[0]),
