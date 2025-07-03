@@ -7,17 +7,24 @@
   "author": "Chris Brinker <chrisbrinker@pm.me>",
   "license": "MIT",
   "scripts": {
-    "start": "node --loader=@esbuild-kit/esm-loader src/index.ts"
+    "start": "node --loader=@esbuild-kit/esm-loader src/index.ts",
+    "fillDb": "node --loader=@esbuild-kit/esm-loader src/loadCards.ts"
   },
   "dependencies": {
     "@esbuild-kit/esm-loader": "^2.6.5",
     "@tcgdex/sdk": "^2.7.0",
+    "dotenv": "^17.0.1",
+    "drizzle-orm": "^0.44.2",
     "patch-package": "^8.0.0",
+    "pg": "^8.16.3",
     "postinstall-postinstall": "^2.1.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.3",
+    "@types/pg": "^8.15.4",
+    "drizzle-kit": "^0.31.4",
     "tsc": "^2.0.4",
+    "tsx": "^4.20.3",
     "vite": "^6.3.5"
   }
 }
