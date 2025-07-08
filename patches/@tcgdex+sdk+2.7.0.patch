@@ -1,25 +1,16 @@
 diff --git a/node_modules/@tcgdex/sdk/dist/tcgdex.node.d.mts b/node_modules/@tcgdex/sdk/dist/tcgdex.node.d.mts
-index dc246ff..97bf807 100644
+index dc246ff..a87d594 100644
 --- a/node_modules/@tcgdex/sdk/dist/tcgdex.node.d.mts
 +++ b/node_modules/@tcgdex/sdk/dist/tcgdex.node.d.mts
-@@ -1,4 +1,5 @@
- import CacheInterface from '@cachex/core';
-+import { off } from 'process';
- 
- declare class Query {
-     params: Array<{
-@@ -531,9 +532,14 @@ declare class Set extends Model {
-          * Number of possible cards
-          */
-         firstEd?: number;
-+
+@@ -534,6 +534,11 @@ declare class Set extends Model {
      };
-+
      cards: Array<CardResume>;
      boosters?: Array<Booster>;
-+    abbreviation?: {
-+        official: string;
-+    }
++
++    abbreviation?: {    
++        
++        official?: string;
++    };
      getSerie(): Promise<Serie | null>;
      protected fill(obj: object): void;
  }

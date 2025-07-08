@@ -1,3 +1,5 @@
+import { SetModel } from "@tcgdex/sdk";
+
 export const energyNameMap: Record<string, string> = {
   "Basic {L} Energy": "Lightning Energy",
   "Basic {D} Energy": "Darkness Energy",
@@ -26,3 +28,24 @@ export const intlToJapaneseSetMap: Record<string, string> = {
   jtg: "sv09", // Journey Together
   dri: "sv10", // Destined Rivals
 };
+
+// Manual fix for abbrevations
+const fixAbbreviationsMap: Record<string, string> = {
+  // TCGdex uses "SV" for Scarlet & Violet, but "SVI" is printed on cards and used for Decklists
+  SV: "SVI",
+};
+/**
+ * Checks if the abbreviation exists in the fixAbbreviationsMap and replaces it in the passed object
+ * @param abbr
+ * @returns nothing, modifies the object in place
+ */
+export function fixAbbreviation(
+  set: SetModel & { abbreviation?: { official?: string } }
+) {
+  if (set.abbreviation?.official) {
+    const abbr = set.abbreviation.official;
+    if (fixAbbreviationsMap[abbr]) {
+      set.abbreviation.official = fixAbbreviationsMap[abbr];
+    }
+  }
+}

@@ -5,8 +5,10 @@
 
 node_modules
 /build
+dist
 
 debug
+temp
 
 # Deal with environment files
 .env

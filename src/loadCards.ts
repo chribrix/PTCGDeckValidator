@@ -1,127 +1,173 @@
-// connect to db
-// load cards from tcgdex
-// save cards to db
-
-import TCGdex, { CardResume, Query } from "@tcgdex/sdk";
-import { writeFile, writeFileSync } from "fs";
-import { serial, text, pgSchema, date, jsonb } from "drizzle-orm/pg-core";
-import { drizzle } from "drizzle-orm/node-postgres";
 import { config } from "dotenv";
-import { Cards, Sets as Sets, CardTypeEnum } from "./db/schema.js";
 
-config(); // Load environment variables from .env file
+import { MikroORM } from "@mikro-orm/postgresql";
+import TCGdex, { CardResumeModel, Query, SetModel } from "@tcgdex/sdk";
 
-const client = drizzle(process.env.DATABASE_URL!);
+import { CardCategoryEnum, Cards } from "./db/entities/Cards.js";
+import { CardSet } from "./db/entities/CardSet.js";
+import { fixAbbreviation } from "./data/conversions.js";
+
+config();
+
+const client = await MikroORM.init();
+const em = client.em;
+
+const generator = client.getSchemaGenerator();
+await generator.updateSchema();
 
 const tcgdex = new TCGdex("en");
+const tcgDexDe = new TCGdex("de");
 
-// Manual fix for abbrevations
-const fixAbbreviationsMap = {
-  SV: "SVI", // TCGdex uses "SV" for Scarlet & Violet, but "SVI" is printed on cards
-};
-
-// Query sets from SVI onward
-/*
+const releaseDateScarletViolet = new Date("2023-03-01");
+const earliestLegalSetReleaseDate = releaseDateScarletViolet;
 const setRes = await tcgdex.set.list();
 
-const sets = (
+console.log(`Found ${setRes.length} sets from TCGdex API.`);
+
+let sets = (
   await Promise.all(
     setRes.map(async (token) => {
-      const set = await token.getSet();
-      // keep following properties: id, legal, logo, name, releaseDate, serie, name, serie, symbol, abbreviation
-      if (new Date(set.releaseDate) >= new Date("2023-03-01")) {
-        return {
-          id: set.id,
-          legal: set.legal,
-          logo: set.logo,
-          name: set.name,
-          releaseDate: set.releaseDate,
-          serie: set.serie,
-          symbol: set.symbol,
-          // @ts-ignore TCGdex SDK does not have abbreviation in type
-          abbreviation: set.abbreviation ? set.abbreviation : null,
-        };
-      }
+      const set: SetModel & {
+        abbreviation?: { official?: string };
+      } = await token.getSet();
 
-      return;
+      fixAbbreviation(set);
+
+      const legal = {
+        standard: new Date(set.releaseDate) >= earliestLegalSetReleaseDate,
+        expanded: set.legal.expanded,
+      };
+
+      return {
+        id: set.id,
+        legal: legal,
+        logo: set.logo,
+        name: set.name,
+        releaseDate: set.releaseDate,
+        serie: set.serie,
+        symbol: set.symbol,
+        abbreviation: set.abbreviation ? set.abbreviation : null,
+        totalCount: set.cardCount.total,
+      };
     })
-  )
-)
-  .filter(Boolean) // remove entries where date is before 2023-03-01 (null entries)
-  .filter((set) => set?.serie.name !== "Pokemon TCG Pocket"); // Remove Pocket TCG sets
+  ).catch((error) => {
+    console.error("Error fetching sets from TCGdex API:", error);
+    return [];
+  })
+).filter((set) => set?.serie.name !== "Pokémon TCG Pocket"); // Remove Pocket TCG sets
 
 if (sets.length === 0) {
-  console.error("No sets found from SVI onward.");
-  process.exit(1);
+  throw new Error("No sets found from TCGdex API.");
 }
 
 await Promise.all(
   sets.map(async (set) => {
     if (!set) {
-      console.warn("Set is undefined, skipping...");
+      console.warn("Set is undefined or null, skipping.");
       return;
     }
 
-    // Inseert all sets
-    const result = await client
-      .insert(Sets)
-      .values({
-        id: set.id,
-        name: set.name,
-        logo: set.logo,
-        releaseDate: set.releaseDate,
-        legal: set.legal,
-        serie: set.serie.name,
-        symbol: set.symbol,
-        abbreviation: set.abbreviation?.official ?? null, // Handle optional abbreviation
-      })
-      .onConflictDoNothing() // Avoid duplicates
-      .returning();
+    console.log(`Inserting set: ${set.name} (${set.id})`);
+    // Insert all sets
+    const result = await em.insert(CardSet, {
+      id: set.id,
+      name: set.name,
+      logo: set.logo,
+      releaseDate: set.releaseDate,
+      legal: set.legal,
+      serie: set.serie.name,
+      symbol: set.symbol,
+      abbreviation: set.abbreviation?.official ?? null, // Handle optional abbreviation
+    });
   })
 );
-// Todo memoize loaded sets and cards, to continue when interrupted
-const currentSet = sets[0]?.name;
-const set1 = sets[0];
-*/
-const sv01 = await tcgdex.set.list(Query.create().equal("id", "sv01"));
-const sv01set = await sv01[0].getSet();
-const cards = sv01set.cards;
 
-// query each card in set
-const cardPromises = cards.map(async (card) => {
-  //const card = cards[0]; // For testing, just use the first card
-  try {
-    const cardData = await card.getCard();
+em.flush()
+  .then(() => {
+    console.log("All sets inserted successfully.");
+  })
+  .catch((error) => {
+    console.error("Error inserting sets:", error);
+  });
 
-    let abbrvId: string | null = null;
-    if (typeof sv01set.abbreviation?.official === "string") {
-      // Build printed ID (e.g., "TWM-200" for Dragapult ex)
-      abbrvId = sv01set.abbreviation.official + "-" + cardData.id.split("-")[1];
-    }
-
-    // Insert card into database
-    const result = await client
-      .insert(Cards)
-      .values({
-        id: cardData.id,
-        printedId: abbrvId,
-        name: { en: cardData.name },
-        set: sv01set.id,
-        rarity: cardData.rarity,
-        type: cardData.category.toLocaleLowerCase() as (typeof CardTypeEnum.enumValues)[number],
-        legal: cardData.legal,
-        apiUpdatedAt: cardData.updated,
-        updatedAt: new Date().toISOString(), // Use current time for updatedAt
-      })
-      .onConflictDoNothing()
-      .returning();
-  } catch (error) {
-    console.error(error);
-    // Handle error, e.g., log it or retry
+// Sets before Scarlet & Violet are not required anymore
+sets = sets.filter((set) => {
+  if (set && set.releaseDate) {
+    const releaseDate = new Date(set.releaseDate);
+    return releaseDate >= releaseDateScarletViolet;
   }
+  return false;
 });
 
-// Query cards from the first set
-// for each set, query set
-// for each card in set, query card, insert card into db
-// handle reprints
+for (const set of sets) {
+  if (!set) {
+    console.warn("Set is undefined or null, skipping.");
+    continue;
+  }
+  const currentSet = set.name;
+
+  console.log(`Processing set: ${set.name} (${set.id})`);
+  const totalCards = set.totalCount;
+  console.log(`Total cards in set: ${totalCards}`);
+
+  const abbrvId = set.abbreviation?.official || null;
+
+  let cards: CardResumeModel[] = [];
+  try {
+    cards = await tcgdex.card.list(Query.create().equal("set.id", set.id));
+  } catch (error) {
+    console.error(`Error fetching cards for set ${set.name} (${set.id}):`);
+  }
+
+  console.log(`Found ${cards.length} cards in set: ${currentSet} (${set.id})`);
+
+  let processedCards = 0;
+  await Promise.all(
+    cards.map(async (card) => {
+      try {
+        const cardData = await card.getCard();
+
+        // get german card data
+        const cardDataDe = await tcgDexDe.card.get(card.id);
+
+        if (!cardDataDe) {
+          console.warn(`German card data not found for card ID: ${card.id}`);
+          return;
+        }
+
+        processedCards++;
+
+        if (!cardData) {
+          console.warn(`Card data is undefined for card ID: ${card.id}`);
+          return;
+        }
+        // All of these are currently legal,
+        //  TODO handle 2026 rotation
+        const legal = {
+          standard: true,
+          expanded: true,
+        };
+
+        // Insert card into database
+        //const result = await client(Card).values({
+        const a = await em.insert(Cards, {
+          id: cardData.id,
+          printedId: `${abbrvId}-${cardData.id.split("-")[1]}`,
+          name: { en: cardData.name, de: cardDataDe!.name },
+          set: set.id,
+          rarity: cardData.rarity,
+          type: cardData.category.toLowerCase() as CardCategoryEnum,
+          legal: legal,
+          // @ts-ignore
+          apiUpdatedAt: cardData.updated,
+          updatedAt: new Date().toISOString(), // Use current time for updatedAt
+        });
+      } catch (error) {
+        console.error(error);
+        // Handle error, e.g., log it or retry
+      }
+    })
+  );
+}
+
+await client.close();

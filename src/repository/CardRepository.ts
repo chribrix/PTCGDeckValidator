@@ -1,4 +1,7 @@
-import TCGdex, { Query, Card, type SupportedLanguages } from "@tcgdex/sdk";
+import { EntityManager, MikroORM } from "@mikro-orm/postgresql";
+
+import { Cards } from "../db/entities/Cards.js";
+import { CardSet } from "../db/entities/CardSet.js";
 
 /**
  *  TODO
@@ -11,21 +14,53 @@ import TCGdex, { Query, Card, type SupportedLanguages } from "@tcgdex/sdk";
  */
 
 class CardRepository {
-  private language: SupportedLanguages = "en"; // Default language
-  private _instance: CardRepository;
+  private mikroOrm: MikroORM | null = null;
+  private _em: EntityManager | null = null;
 
-  private constructor(language: SupportedLanguages) {
-    this.language = language;
+  private constructor(mikroOrm: MikroORM) {
+    this.mikroOrm = mikroOrm;
+    this._em = mikroOrm.em.fork(); // Use a forked EntityManager for operations
   }
 
-  get instance(): CardRepository {
-    return this._instance ?? new TCGdex(this.language);
+  static async init() {
+    const mikroOrm = await MikroORM.init();
+    return new CardRepository(mikroOrm);
+  }
+
+  get em(): EntityManager {
+    if (!this._em) {
+      throw new Error("EntityManager is not initialized.");
+    }
+    return this._em;
+  }
+
+  public async getSetById(id: string): Promise<CardSet | null> {
+    const set = await this.em.findOne(CardSet, { id });
+    return set;
   }
 
   public async getCardById(id: string): Promise<any> {
-    // Simulate fetching card data by ID
     return { id, name: "Sample Card", type: "Pokemon" };
   }
-}
 
+  public async getCardsBySetId(setId: string): Promise<Cards[] | null> {
+    const res = await this.em.find(Cards, { set: setId });
+
+    return res;
+  }
+
+  public async getMultipleCardsByIds(ids: string[]): Promise<Cards[] | null> {
+    if (!ids || ids.length === 0) return [];
+
+    const cards = await this.em.find(Cards, { id: { $in: ids } });
+
+    return cards;
+  }
+
+  public async close() {
+    if (this.mikroOrm) {
+      await this.mikroOrm.close();
+    }
+  }
+}
 export default CardRepository;
