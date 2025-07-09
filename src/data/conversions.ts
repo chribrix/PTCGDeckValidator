@@ -1,14 +1,44 @@
 import { SetModel } from "@tcgdex/sdk";
 
-export const energyNameMap: Record<string, string> = {
-  "Basic {L} Energy": "Lightning Energy",
-  "Basic {D} Energy": "Darkness Energy",
-  "Basic {F} Energy": "Fighting Energy",
-  "Basic {P} Energy": "Psychic Energy",
-  "Basic {M} Energy": "Metal Energy",
-  "Basic {W} Energy": "Water Energy",
-  "Basic {G} Energy": "Grass Energy",
-  "Basic {R} Energy": "Fire Energy",
+export const energyAbbrvMap: Record<string, string> = {
+  "Basic {L} Energy": "Basic Lightning Energy",
+  "Basic {D} Energy": "Basic Darkness Energy",
+  "Basic {F} Energy": "Basic Fighting Energy",
+  "Basic {P} Energy": "Basic Psychic Energy",
+  "Basic {M} Energy": "Basic Metal Energy",
+  "Basic {W} Energy": "Basic Water Energy",
+  "Basic {G} Energy": "Basic Grass Energy",
+  "Basic {R} Energy": "Basic Fire Energy",
+};
+
+export const energyTypeMapEn: Record<string, string> = {
+  Lightning: "Basic Lightning Energy",
+  Darkness: "Basic Darkness Energy",
+  Fighting: "Basic Fighting Energy",
+  Psychic: "Basic Psychic Energy",
+  Metal: "Basic Metal Energy",
+  Water: "Basic Water Energy",
+  Grass: "Basic Grass Energy",
+  Fire: "Basic Fire Energy",
+};
+
+export const energyAliasMap: Record<string, string> = {
+  dark: "Darkness",
+  darkness: "Darkness",
+  electro: "Lightning",
+  electric: "Lightning",
+  lightning: "Lightning",
+  fight: "Fighting",
+  fighting: "Fighting",
+  psychic: "Psychic",
+  psy: "Psychic",
+  metal: "Metal",
+  steel: "Metal",
+  water: "Water",
+  grass: "Grass",
+  leaf: "Grass",
+  fire: "Fire",
+  flame: "Fire",
 };
 
 export const intlToJapaneseSetMap: Record<string, string> = {

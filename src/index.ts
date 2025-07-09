@@ -1,10 +1,11 @@
 import PTCGDeckValidator from "./PTCGDeckValidatorTCGdex.js";
-import { readFileSync } from "fs";
+import { read, readFileSync } from "fs";
 import CardRepository from "./repository/CardRepository.js";
 
-const validator = await CardRepository.init();
+const validator = await PTCGDeckValidator.init();
 
-const set = await validator.getSetById("base1");
+const deck = readFileSync("./debug/gardi.txt", "utf-8");
+const validationResponse = await validator.check(deck);
+console.log(validationResponse);
 
-console.log(set);
 await validator.close();

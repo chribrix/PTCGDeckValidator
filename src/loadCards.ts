@@ -158,7 +158,6 @@ for (const set of sets) {
           rarity: cardData.rarity,
           type: cardData.category.toLowerCase() as CardCategoryEnum,
           legal: legal,
-          // @ts-ignore
           apiUpdatedAt: cardData.updated,
           updatedAt: new Date().toISOString(), // Use current time for updatedAt
         });

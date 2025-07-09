@@ -40,11 +40,50 @@ class CardRepository {
   }
 
   public async getCardById(id: string): Promise<any> {
-    return { id, name: "Sample Card", type: "Pokemon" };
+    return await this.em.findOne(Cards, { id });
+  }
+
+  getCardByName(name: string) {
+    return this.em
+      .findOne(Cards, {
+        $or: [
+          { name: { en: name } },
+          { name: { de: name } },
+          { name: { fr: name } },
+          { name: { it: name } },
+        ],
+      })
+      .catch((error) => {
+        console.error("Error fetching card by name:", error);
+        return null;
+      });
   }
 
   public async getCardsBySetId(setId: string): Promise<Cards[] | null> {
     const res = await this.em.find(Cards, { set: setId });
+
+    return res;
+  }
+
+  async getCardByNameAndId(name: string, id: string) {
+    const res = await this.em
+      .findOne(Cards, {
+        $and: [
+          {
+            $or: [
+              { name: { en: name } },
+              { name: { de: name } },
+              { name: { fr: name } },
+              { name: { it: name } },
+            ],
+            id: id,
+          },
+        ],
+      })
+      .catch((error) => {
+        console.error("Error fetching card by name and set ID:", error);
+        return null;
+      });
 
     return res;
   }

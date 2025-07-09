@@ -1,8 +1,12 @@
-import TCGdex, { Query, Card } from "@tcgdex/sdk";
-import type { CardResume } from "@tcgdex/sdk";
-import { energyNameMap, intlToJapaneseSetMap } from "./data/conversions.js";
+import {
+  energyAbbrvMap,
+  energyAliasMap,
+  energyTypeMapEn,
+  intlToJapaneseSetMap,
+} from "./data/conversions.js";
 
 import { writeFileSync } from "fs";
+import CardRepository from "./repository/CardRepository.js";
 
 export type ValidationResult = {
   isValid: boolean;
@@ -25,20 +29,19 @@ type DeckSections = {
 };
 
 class PTCGDeckValidator {
-  protected _tcgDexEn?: TCGdex;
-  protected _tcgDexDe?: TCGdex;
+  protected cardRepository: CardRepository; // Placeholder for CardRepository type
 
-  constructor() {
-    this._tcgDexDe ?? new TCGdex("de");
-    this._tcgDexEn ?? new TCGdex("en");
+  constructor(cardRepo: CardRepository) {
+    this.cardRepository = cardRepo;
   }
 
-  get dexDe() {
-    return this._tcgDexDe ?? new TCGdex("de");
+  static async init() {
+    const cardRepository = await CardRepository.init();
+    return new PTCGDeckValidator(cardRepository);
   }
 
-  get dexEn() {
-    return this._tcgDexEn ?? new TCGdex("en");
+  async close() {
+    await this.cardRepository.close();
   }
 
   parseDeck(deckString: string) {
@@ -101,9 +104,12 @@ class PTCGDeckValidator {
 
     const pokemonTokens = pokemonCards.map((card) => this.toCardToken(card));
     const trainerTokens = trainerCards.map((card) => this.toCardToken(card));
-    const energyTokens = energyCards.map((card) => this.toCardToken(card));
+    const energyTokens = this.sanitizeEnergyTokens(
+      energyCards.map((card) => this.toCardToken(card))
+    );
+
     return {
-      deck: {
+      deckTokens: {
         pokemonTokens,
         trainerTokens,
         energyTokens,
@@ -114,48 +120,47 @@ class PTCGDeckValidator {
 
   async check(decklist: string) {
     let errors: Array<string> = [];
-    let isValid = true;
-    const { deck, errors: parseErrors } = this.parseDeck(decklist);
+    const { deckTokens, errors: parseErrors } = this.parseDeck(decklist);
 
-    if (parseErrors.length > 1) {
-      console.dir(parseErrors, { depth: 10 });
+    // store deck tokens
+    const fancy = JSON.stringify(deckTokens, null, 2);
+    writeFileSync("gardiTokens.json", fancy);
+
+    if (parseErrors.length > 0) {
       return { isValid: false, errors: parseErrors };
     }
 
-    const { cards: pokemonCards, errors: pkmnErrors } =
-      await this.queryPokemonCards(deck.pokemonTokens);
-
-    if (pkmnErrors.length > 0) {
-      errors = errors.concat(pkmnErrors);
-      isValid = false;
-    }
-
-    const { cards: trainerCards, errors: trainerErrors } =
-      await this.queryTrainerCards(deck.trainerTokens);
-
-    if (trainerErrors.length > 0) {
-      errors = errors.concat(trainerErrors);
-      isValid = false;
-    }
-
-    const { cards: energyCards, errors: energyErrors } =
-      await this.queryEnergyCards(deck.energyTokens);
-
-    if (energyErrors.length > 0) {
-      errors = errors.concat(energyErrors);
-      isValid = false;
-    }
-
-    const _deck = [...pokemonCards, ...trainerCards, ...energyCards];
-
-    const cardsInDeck = _deck.reduce((sum, curr) => {
+    const cardsInDeck = [
+      ...deckTokens.energyTokens,
+      ...deckTokens.pokemonTokens,
+      ...deckTokens.trainerTokens,
+    ].reduce((sum, curr) => {
       return sum + curr.inDeck;
     }, 0);
 
+    // Make sure we still have 60 cards
     if (cardsInDeck != 60) {
       errors.push(`Must be 60 cards in deck, but found ${cardsInDeck}`);
-      isValid = false;
     }
+
+    const { cards: pokemonCards, errors: pkmnErrors } =
+      await this.getPokemonCards(deckTokens.pokemonTokens);
+    const { cards: trainerCards, errors: trainerErrors } =
+      await this.getTrainerCards(deckTokens.trainerTokens);
+    const { cards: energyCards, errors: energyErrors } =
+      await this.getEnergyCards(deckTokens.energyTokens);
+
+    if (pkmnErrors.length > 0) {
+      errors = errors.concat(pkmnErrors);
+    }
+    if (trainerErrors.length > 0) {
+      errors = errors.concat(trainerErrors);
+    }
+    if (energyErrors.length > 0) {
+      errors = errors.concat(energyErrors);
+    }
+
+    const deck = [...pokemonCards, ...trainerCards, ...energyCards];
 
     // Make sure no more than 4 per card (except energies)
     const nameCountMap: Record<string, number> = {};
@@ -165,7 +170,6 @@ class PTCGDeckValidator {
     }
     for (const [name, total] of Object.entries(nameCountMap)) {
       if (total > 4) {
-        isValid = false;
         errors.push(
           `Card "${name}" exceeds limit: ${total} copies in deck (max 4 allowed).`
         );
@@ -176,7 +180,7 @@ class PTCGDeckValidator {
     let aceSpecCount = 0;
     let aceSpecs = new Set();
     let notStandardLegal = new Set();
-    _deck.forEach((card) => {
+    deck.forEach((card) => {
       if (card.rarity === "ACE SPEC Rare") {
         aceSpecCount += card.inDeck;
         aceSpecs.add(card.name);
@@ -188,7 +192,6 @@ class PTCGDeckValidator {
     });
 
     if (aceSpecCount > 1) {
-      isValid = false;
       errors.push(
         `Deck can contain at most 1 ACE SPEC card, but found ${Array.from(
           aceSpecs
@@ -203,57 +206,78 @@ class PTCGDeckValidator {
       );
     }
 
-    const str = JSON.stringify(_deck, null, 2);
+    const str = JSON.stringify(deck, null, 2);
     writeFileSync("gardiComplete.json", str);
 
     return {
-      isValid,
+      isValid: errors.length === 0,
       errors,
     };
   }
 
-  async queryCardByNameAndSetCode(cardToken: CardToken) {
+  sanitizeEnergyTokens(energyTokens: Array<CardToken>) {
+    // map energy names from PTGCL exports to match limitless export format
+    const energies = energyTokens.map((item) => {
+      let name = item.name;
+      if (energyAbbrvMap.hasOwnProperty(name)) {
+        name = energyAbbrvMap[name];
+      }
+
+      // Handle misspellings and aliases for energies and map them to the correct name
+      const energyAliases = Object.keys(energyAliasMap);
+      for (const alias of energyAliases) {
+        if (name.toLowerCase().includes(alias)) {
+          name = energyAliasMap[alias];
+          name = energyTypeMapEn[name] || name; // map to english energy name
+          break;
+        }
+      }
+
+      return {
+        ...item,
+        name: name,
+      };
+    });
+
+    return energies;
+  }
+
+  async getCardByNameAndId(cardToken: CardToken) {
     if (!this.hasSetId(cardToken)) {
       throw new Error("Card Set Info not given.");
     }
     const id = this.buildCardId(cardToken);
 
-    const cardResponse = await this.dexEn.card.list(
-      Query.create().equal("id", id).equal("name", cardToken.name)
+    const card = await this.cardRepository.getCardByNameAndId(
+      cardToken.name,
+      id
     );
-    console.log(cardToken.name);
-    if (cardResponse.length === 0) {
-      throw new Error(`Invalid id: ${cardToken.set} ${cardToken.setId}`);
-    }
 
-    const card = await cardResponse[0].getCard();
-
-    if (card.name !== cardToken.name) {
+    if (!card) {
       throw new Error(
-        `Card name "${cardToken.name}" does not match with Set Code ${cardToken.set} ${cardToken.setId}: ${card.name}.`
+        `Card with name "${cardToken.name}" and set code "${cardToken.set} ${cardToken.setId}" not found.`
       );
     }
+
     return card;
   }
 
-  async queryCardByName(cardToken: CardToken) {
-    const cardResponse = await this.dexEn.card.list(
-      Query.create().equal("name", cardToken.name)
-    );
+  async getCardByName(cardToken: CardToken) {
+    const card = await this.cardRepository.getCardByName(cardToken.name);
 
-    if (cardResponse.length === 0) {
-      throw new Error(`No such card name: ${cardToken.name}`);
+    if (!card) {
+      throw new Error(
+        `Card with name "${cardToken.name}" and set code "${cardToken.set} ${cardToken.setId}" not found.`
+      );
     }
 
-    const card = await cardResponse[0].getCard();
-
     return card;
   }
 
-  async queryPokemonCards(pokemon: Array<CardToken>) {
+  async getPokemonCards(pokemon: Array<CardToken>) {
     const results = await Promise.allSettled(
       pokemon.map(async (token) => {
-        const res = await this.queryCardByNameAndSetCode(token);
+        const res = await this.getCardByNameAndId(token);
 
         return { ...token, legal: res.legal, rarity: res.rarity };
       })
@@ -262,10 +286,10 @@ class PTCGDeckValidator {
     return this.buildValidationResponse(results);
   }
 
-  async queryTrainerCards(trainers: Array<CardToken>) {
+  async getTrainerCards(trainers: Array<CardToken>) {
     const results = await Promise.allSettled(
       trainers.map(async (token) => {
-        const res = await this.queryCardByName(token);
+        const res = await this.getCardByName(token);
 
         return { ...token, legal: res.legal, rarity: res.rarity };
       })
@@ -274,16 +298,10 @@ class PTCGDeckValidator {
     return this.buildValidationResponse(results);
   }
 
-  async queryEnergyCards(_energies: Array<CardToken>) {
-    // map energy names from PTGCL exports to match limitless export format
-    const energies = _energies.map((item) => ({
-      ...item,
-      name: energyNameMap[item.name] || item.name,
-    }));
-
+  async getEnergyCards(energies: Array<CardToken>) {
     const results = await Promise.allSettled(
       energies.map(async (token) => {
-        const res = await this.queryCardByName(token);
+        const res = await this.getCardByName(token);
 
         return { ...token, legal: res.legal, rarity: res.rarity };
       })
@@ -306,11 +324,13 @@ class PTCGDeckValidator {
 
     return { cards, errors };
   }
+
   hasSetId(
     token: CardToken
   ): token is CardToken & { setId: number; set: string } {
     return typeof token.setId === "number" && typeof token.set === "string";
   }
+
   toCardToken(cardString: string): CardToken {
     const parts = cardString.split(" ");
 
@@ -344,58 +364,6 @@ class PTCGDeckValidator {
     const id = cardToken.setId.toString().padStart(3, "0");
     return `${code}-${id}`;
   }
-  /*
-  async validate(
-    config: { format: "standard" | "expanded" | "unlimited" } = {
-      format: "standard",
-    }
-  ): Promise<ValidationResult> {
-    let isValid = true;
-    const errors = new Set<string>();
-
-    // make sure we still have 60 cards
-    const cardCount = this.countCards();
-    if (cardCount !== 60) {
-      isValid = false;
-      errors.add(`Deck contains ${cardCount} cards, but should be 60.`);
-    }
-
-    // check ace specs
-    let aceSpecCount = 0;
-    this.deck.forEach((card) => {
-      //const subtypes = card.subtypes;
-      //if (!subtypes.includes("ACE SPEC" as PokemonTCG.Subtype)) {
-      return;
-      //}
-      aceSpecCount += card.inDeck;
-      // TODO maybe differentiate between multiple copies of a single ACE SPEC and various ACE SPECs
-    });
-
-    if (aceSpecCount > 1) {
-      isValid = false;
-      errors.add(
-        `Deck can contain at most 1 ACE SPEC card, but found ${aceSpecCount}`
-      );
-    }
-
-    const tooManyCopies = new Array<string>();
-    // assert no unique card count > 4
-    this.deck.forEach((card) => {
-      if (
-        card.inDeck > 4 && card.supertype !== PokemonTCG.Supertype.Energy
-      ) {
-        tooManyCopies.push(card.name);
-      }
-    });
-
-    if (tooManyCopies.length > 0) {
-      isValid = false;
-      errors.add("Too many copies of cards: ".concat(tooManyCopies.join(", ")));
-    }
-
-    return { isValid, errors };
-  }
-  */
 }
 
 export default PTCGDeckValidator;
